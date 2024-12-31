@@ -27,6 +27,19 @@ class Contact:
     phone_number: str
     email: str
 
+    def to_boto(self):
+        return {
+            'FirstName': self.first_name,
+            'LastName': self.last_name,
+            'ContactType': self.contact_type,
+            'AddressLine1': self.address_line_1,
+            'City': self.city,
+            'State': self.state,
+            'CountryCode': self.country_code,
+            'ZipCode': self.zip_code,
+            'PhoneNumber': self.phone_number,
+            'Email': self.email
+        }
 
 @dataclass
 class DomainEvent:
@@ -126,18 +139,7 @@ class DomainManagerLive(DomainManager):
         return self.client.transfer_domain(**kwargs)
 
     def update_domain_contact(self, domain_name: str, contact: Contact):
-        updated_contact = {
-            'FirstName': contact.first_name,
-            'LastName': contact.last_name,
-            'ContactType': contact.contact_type,
-            'AddressLine1': contact.address_line_1,
-            'City': contact.city,
-            'State': contact.state,
-            'CountryCode': contact.country_code,
-            'ZipCode': contact.zip_code,
-            'PhoneNumber': contact.phone_number,
-            'Email': contact.email
-        }
+        updated_contact = contact.to_boto()
 
         return self.client.update_domain_contact(
             DomainName = domain_name,
@@ -179,6 +181,7 @@ def parse_event(event):
     )
 
 
+
 @helper.create
 def create(event, context):
     logger.info("Got Create")
@@ -196,9 +199,9 @@ def create(event, context):
                     DomainName = domain_event.domain_name,
                     DurationInYears = 1,
                     AutoRenew = domain_event.auto_renew,
-                    AdminContact = domain_event.contact,
-                    RegistrantContact = domain_event.contact,
-                    TechContact = domain_event.contact,
+                    AdminContact = domain_event.contact.to_boto(),
+                    RegistrantContact = domain_event.contact.to_boto(),
+                    TechContact = domain_event.contact.to_boto(),
                     PrivacyProtectAdminContact = True,
                     PrivacyProtectRegistrantContact = True,
                     PrivacyProtectTechContact = True
@@ -220,9 +223,9 @@ def create(event, context):
                     'AuthCode': transfer_auth_code,
                     'DurationInYears': 1,
                     'AutoRenew': domain_event.auto_renew,
-                    'AdminContact': domain_event.contact,
-                    'RegistrantContact': domain_event.contact,
-                    'TechContact': domain_event.contact,
+                    'AdminContact': domain_event.contact.to_boto(),
+                    'RegistrantContact': domain_event.contact.to_boto(),
+                    'TechContact': domain_event.contact.to_boto(),
                     'PrivacyProtectAdminContact': True,
                     'PrivacyProtectRegistrantContact': True,
                     'PrivacyProtectTechContact': True
@@ -234,6 +237,9 @@ def create(event, context):
                 domain_manager.transfer_domain(**params)
             else:
                 raise Exception(f"Domain {domain_event.domain_name} is not transferable")
+    else:
+        # todo: if the domain is already exists, it may need to be updated (name servers, etc)
+        pass
 
     return domain_event.domain_name
 
