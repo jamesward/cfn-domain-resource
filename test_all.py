@@ -91,3 +91,33 @@ def test_live_create_unavailable():
 
     with pytest.raises(Exception):
         index.create(event, None)
+
+# def test_live_update():
+#     event = {
+#         'ResourceProperties': {
+#             'DomainName': "armchairchats.com",
+#             'Contact': {
+#                 'firstName': "James",
+#                 'lastName': "Ward",
+#                 'type': "PERSON",
+#                 'phoneNumber': "+1.3035551212",
+#                 'email': "james@jamesward.com",
+#                 'addressLine1': "PO Box 4202",
+#                 'city': "Crested Butte",
+#                 'state': "CO",
+#                 'countryCode': "US",
+#                 'zipCode': "81224"
+#             },
+#             'AutoRenew':  True,
+#             'NameServers': [
+#                 "ns1.afternic.com",
+#                 "ns2.afternic.com",
+#                 "verification-sixmy6f2sjew8cppecsorj.ns101.verify.hn"
+#             ]
+#         }
+#     }
+#
+#     index.domain_manager = DomainManagerLive()
+#     response = index.update(event, None)
+#     print(response)
+#     assert False

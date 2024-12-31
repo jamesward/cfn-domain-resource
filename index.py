@@ -13,6 +13,29 @@ logger = logging.getLogger(__name__)
 
 helper = CfnResource(json_logging=False, log_level='DEBUG', boto_level='CRITICAL', sleep_on_delete=120, ssl_verify=None)
 
+
+@dataclass
+class Contact:
+    first_name: str
+    last_name: str
+    contact_type: str
+    address_line_1: str
+    city: str
+    state: str
+    country_code: str
+    zip_code: str
+    phone_number: str
+    email: str
+
+
+@dataclass
+class DomainEvent:
+    domain_name: str
+    contact: Contact
+    auto_renew: bool
+    name_servers: Optional[List[str]]
+
+
 class DomainManager(ABC):
     @abstractmethod
     def list_domains(self) -> dict:
@@ -91,8 +114,11 @@ class DomainManagerLive(DomainManager):
     def register_domain(self, **kwargs) -> dict:
         return self.client.register_domain(**kwargs)
 
-    def update_domain_nameservers(self, **kwargs) -> dict:
-        return self.client.update_domain_nameservers(**kwargs)
+    def update_domain_nameservers(self, domain_name: str, name_servers: List[str]) -> dict:
+        return self.client.update_domain_nameservers(
+            DomainName = domain_name,
+            Nameservers = [{'Name': ns} for ns in name_servers]
+        )
 
     def check_domain_transferability(self, **kwargs) -> dict:
         return self.client.check_domain_transferability(**kwargs)
@@ -100,26 +126,32 @@ class DomainManagerLive(DomainManager):
     def transfer_domain(self, **kwargs) -> dict:
         return self.client.transfer_domain(**kwargs)
 
-@dataclass
-class Contact:
-    first_name: str
-    last_name: str
-    contact_type: str
-    address_line_1: str
-    city: str
-    state: str
-    country_code: str
-    zip_code: str
-    phone_number: str
-    email: str
+    def update_domain_contact(self, domain_name: str, contact: Contact):
+        updated_contact = {
+            'FirstName': contact.first_name,
+            'LastName': contact.last_name,
+            'ContactType': contact.contact_type,
+            'AddressLine1': contact.address_line_1,
+            'City': contact.city,
+            'State': contact.state,
+            'CountryCode': contact.country_code,
+            'ZipCode': contact.zip_code,
+            'PhoneNumber': contact.phone_number,
+            'Email': contact.email
+        }
 
+        return self.client.update_domain_contact(
+            DomainName = domain_name,
+            AdminContact = updated_contact,
+            RegistrantContact = updated_contact,
+            TechContact = updated_contact
+        )
 
-@dataclass
-class DomainEvent:
-    domain_name: str
-    contact: Contact
-    auto_renew: bool
-    name_servers: Optional[List[str]]
+    def enable_domain_auto_renew(self, domain_name: str):
+        return self.client.enable_domain_auto_renew(DomainName = domain_name)
+
+    def disable_domain_auto_renew(self, domain_name: str):
+        return self.client.disable_domain_auto_renew(DomainName = domain_name)
 
 
 try:
@@ -127,7 +159,6 @@ try:
     pass
 except Exception as e:
     helper.init_failure(e)
-
 
 def parse_event(event):
     return DomainEvent(
@@ -175,10 +206,7 @@ def create(event, context):
                 )
 
                 if domain_event.name_servers:
-                    domain_manager.update_domain_nameservers(
-                        DomainName = domain_event.domain_name,
-                        Nameservers = [{'Name': ns} for ns in domain_event.name_servers]
-                    )
+                    domain_manager.update_domain_nameservers(domain_event.domain_name, domain_event.name_servers)
             else:
                 raise Exception(f"Domain {domain_event.domain_name} is not available")
         else:
@@ -210,75 +238,61 @@ def create(event, context):
 
     return domain_event.domain_name
 
+def contacts_are_equal(new_contact: dict, old_contact: Contact):
+    return (
+        new_contact.get("FirstName") == old_contact.first_name and
+        new_contact.get("LastName") == old_contact.last_name and
+        new_contact.get("ContactType") == old_contact.contact_type and
+        new_contact.get("AddressLine1") == old_contact.address_line_1 and
+        new_contact.get("City") == old_contact.city and
+        new_contact.get("State") == old_contact.state and
+        new_contact.get("CountryCode") == old_contact.country_code and
+        new_contact.get("ZipCode") == old_contact.zip_code and
+        new_contact.get("PhoneNumber") == old_contact.phone_number and
+        new_contact.get("Email") == old_contact.email
+    )
+
+def nameservers_are_equal(new_name_servers: List[str], old_name_servers: List[str]):
+    print(new_name_servers)
+    print(old_name_servers)
+
+    return set(new_name_servers) == set(old_name_servers)
 
 @helper.update
 def update(event, context):
     logger.info("Got Update")
     domain_event = parse_event(event)
-    domain = domain_manager.get_domain(domain_event.domain_name)
+    domain_details = domain_manager.get_domain_detail(domain_event.domain_name)
 
-    if domain is None:
+    if domain_details is None:
         raise Exception(f"Domain {domain_event.domain_name} does not exist")
     else:
-        # todo: update domain
-        pass
+        status = domain_details.get('StatusList', [])
+        pending_transfer = any('PENDING_TRANSFER' in s for s in status)
+
+        if not pending_transfer:
+            admin_contact_same = contacts_are_equal(domain_details.get('AdminContact', {}), domain_event.contact)
+            registrant_contact_same = contacts_are_equal(domain_details.get('RegistrantContact', {}), domain_event.contact)
+            tech_contact_same = contacts_are_equal(domain_details.get('TechContact', {}), domain_event.contact)
+
+            if not admin_contact_same or not registrant_contact_same or not tech_contact_same:
+                domain_manager.update_domain_contact(domain_event.domain_name, domain_event.contact)
+
+
+            if domain_event.auto_renew != domain_details.get('AutoRenew', False):
+                if  domain_event.auto_renew:
+                    domain_manager.enable_domain_auto_renew(domain_event.domain_name)
+                else:
+                    domain_manager.disable_domain_auto_renew(domain_event.domain_name)
+
+
+            if domain_event.name_servers:
+                old_nameservers = [ns.get('Name') for ns in domain_details.get('Nameservers', [])]
+                nameservers_same = nameservers_are_equal(domain_event.name_servers, old_nameservers)
+                if not nameservers_same:
+                    domain_manager.update_domain_nameservers(domain_event.domain_name, domain_event.name_servers)
 
     return domain_event.domain_name
-
-    # domain_details = client.get_domain_detail(
-    #     DomainName = domain_name(event)
-    # )
-    #
-    # status = domain_details.get('StatusList', [])
-    # pending_transfer = any('PENDING_TRANSFER' in s for s in status)
-    #
-    # def contacts_are_different(new_contact, old_contact):
-    #
-    #     print(f"New: {str(new_contact)}")
-    #     print(f"Old: {str(old_contact)}")
-    #
-    #     fields_to_compare = [
-    #         'FirstName',
-    #         'LastName',
-    #         'ContactType',
-    #         'OrganizationName',
-    #         'AddressLine1',
-    #         'AddressLine2',
-    #         'City',
-    #         'State',
-    #         'CountryCode',
-    #         'ZipCode',
-    #         'PhoneNumber',
-    #         'Email'
-    #     ]
-    #
-    #     for field in fields_to_compare:
-    #         if old_contact.get(field) != new_contact.get(field):
-    #             return True
-    #
-    #     return False
-    #
-    # if not pending_transfer:
-    #     updated_admin_contact = contacts_are_different(contact(event), domain_details.get('AdminContact', {}))
-    #     updated_registrant_contact = contacts_are_different(contact(event), domain_details.get('RegistrantContact', {}))
-    #     updated_tech_contact = contacts_are_different(contact(event), domain_details.get('TechContact', {}))
-    #
-    #     if updated_admin_contact or updated_registrant_contact or updated_tech_contact:
-    #         client.update_domain_contact(
-    #             DomainName = domain_name(event),
-    #             AdminContact = contact(event),
-    #             RegistrantContact = contact(event),
-    #             TechContact = contact(event)
-    #         )
-    #
-    #     # todo: update autoRenew
-    #
-    #     # todo: if updated
-    #     if name_servers(event):
-    #         client.update_domain_nameservers(
-    #             DomainName = domain_name(event),
-    #             Nameservers = name_servers(event)
-    #         )
 
 
 @helper.delete
