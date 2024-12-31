@@ -57,7 +57,7 @@ def test_exists():
                 'countryCode': "US",
                 'zipCode': "91222"
             },
-            'AutoRenew':  True
+            'AutoRenew': 'true'
         }
     }
 
@@ -83,7 +83,7 @@ def test_live_create_unavailable():
                 'countryCode': "US",
                 'zipCode': "91222"
             },
-            'AutoRenew':  True
+            'AutoRenew': 'true'
         }
     }
 
@@ -108,7 +108,7 @@ def test_live_create_unavailable():
 #                 'countryCode': "US",
 #                 'zipCode': "81224"
 #             },
-#             'AutoRenew':  True,
+#             'AutoRenew': 'true',
 #             'NameServers': [
 #                 "ns1.afternic.com",
 #                 "ns2.afternic.com",
