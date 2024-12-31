@@ -1,7 +1,6 @@
 import pytest
 import index
-from index import DomainManager
-
+from index import DomainManager, DomainManagerLive
 
 class DomainManagerFake(DomainManager):
     events = []
@@ -67,3 +66,28 @@ def test_exists():
     response = index.create(event, None)
     assert response == "foo.com"
     assert len(index.domain_manager.events) == 0
+
+def test_live_create_unavailable():
+    event = {
+        'ResourceProperties': {
+            'DomainName': "foo.com",
+            'Contact': {
+                'firstName': "Joe",
+                'lastName': "Bob",
+                'type': "PERSON",
+                'phoneNumber': "+1.3035551212",
+                'email': "joe@bob.com",
+                'addressLine1': "PO Box 123",
+                'city': "Nowhere",
+                'state': "CA",
+                'countryCode': "US",
+                'zipCode': "91222"
+            },
+            'AutoRenew':  True
+        }
+    }
+
+    index.domain_manager = DomainManagerLive()
+
+    with pytest.raises(Exception):
+        index.create(event, None)

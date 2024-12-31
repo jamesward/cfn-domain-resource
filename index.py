@@ -15,23 +15,24 @@ helper = CfnResource(json_logging=False, log_level='DEBUG', boto_level='CRITICAL
 
 class DomainManager(ABC):
     @abstractmethod
-    def list_domains(self, **kwargs):
+    def list_domains(self) -> dict:
         pass
 
     @abstractmethod
-    def list_operations(self, **kwargs):
+    def list_operations(self, **kwargs) -> dict:
         pass
 
     @abstractmethod
-    def get_domain_detail(self, domain_name):
+    def get_domain_detail(self, domain_name) -> dict:
         pass
 
     @abstractmethod
-    def get_operation_detail(self, operation_id):
+    def get_operation_detail(self, operation_id) -> dict:
         pass
 
-    def get_domain(self, domain_name):
+    def get_domain(self, domain_name) -> Optional[dict]:
         domains_response = self.list_domains()
+        print(domains_response)
 
         for domain in domains_response['Domains']:
             if domain['DomainName'] == domain_name:
@@ -48,23 +49,23 @@ class DomainManager(ABC):
         return None
 
     @abstractmethod
-    def check_domain_availability(self, domain_name):
+    def check_domain_availability(self, domain_name) -> dict:
         pass
 
     @abstractmethod
-    def register_domain(self, **kwargs):
+    def register_domain(self, **kwargs) -> dict:
         pass
 
     @abstractmethod
-    def update_domain_nameservers(self, **kwargs):
+    def update_domain_nameservers(self, **kwargs) -> dict:
         pass
 
     @abstractmethod
-    def check_domain_transferability(self, **kwargs):
+    def check_domain_transferability(self, **kwargs) -> dict:
         pass
 
     @abstractmethod
-    def transfer_domain(self, **kwargs):
+    def transfer_domain(self, **kwargs) -> dict:
         pass
 
 class DomainManagerLive(DomainManager):
@@ -72,31 +73,31 @@ class DomainManagerLive(DomainManager):
     def __init__(self):
         self.client = boto3.client('route53domains')
 
-    def list_domains(self, **kwargs):
-        self.client.list_domains(**kwargs)
+    def list_domains(self) -> dict:
+        return self.client.list_domains()
 
-    def list_operations(self, **kwargs):
-        self.client.list_operations(**kwargs)
+    def list_operations(self, **kwargs) -> dict:
+        return self.client.list_operations(**kwargs)
 
-    def get_domain_detail(self, domain_name):
-        self.client.get_domain_detail(DomainName = domain_name)
+    def get_domain_detail(self, domain_name) -> dict:
+        return self.client.get_domain_detail(DomainName = domain_name)
 
-    def get_operation_detail(self, operation_id):
-        self.client.get_operation_detail(OperationId = operation_id)
+    def get_operation_detail(self, operation_id) -> dict:
+        return self.client.get_operation_detail(OperationId = operation_id)
 
-    def check_domain_availability(self, domain_name):
+    def check_domain_availability(self, domain_name) -> dict:
         return self.client.check_domain_availability(DomainName = domain_name)
 
-    def register_domain(self, **kwargs):
+    def register_domain(self, **kwargs) -> dict:
         return self.client.register_domain(**kwargs)
 
-    def update_domain_nameservers(self, **kwargs):
+    def update_domain_nameservers(self, **kwargs) -> dict:
         return self.client.update_domain_nameservers(**kwargs)
 
-    def check_domain_transferability(self, **kwargs):
+    def check_domain_transferability(self, **kwargs) -> dict:
         return self.client.check_domain_transferability(**kwargs)
 
-    def transfer_domain(self, **kwargs):
+    def transfer_domain(self, **kwargs) -> dict:
         return self.client.transfer_domain(**kwargs)
 
 @dataclass
@@ -151,7 +152,6 @@ def parse_event(event):
 @helper.create
 def create(event, context):
     logger.info("Got Create")
-    # domain_manager = DomainManagerLive()
     domain_event = parse_event(event)
     domain = domain_manager.get_domain(domain_event.domain_name)
 
