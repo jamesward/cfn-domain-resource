@@ -176,7 +176,7 @@ def parse_event(event):
             phone_number=event['ResourceProperties']['Contact']['phoneNumber'],
             email=event['ResourceProperties']['Contact']['email']
         ),
-        auto_renew=event['ResourceProperties']['AutoRenew'],
+        auto_renew=bool(event['ResourceProperties'].get('AutoRenew', True)),
         name_servers=event['ResourceProperties'].get('NameServers', [])
     )
 
@@ -282,7 +282,7 @@ def update(event, context):
 
 
             if domain_event.auto_renew != domain_details.get('AutoRenew', False):
-                if  domain_event.auto_renew:
+                if domain_event.auto_renew:
                     domain_manager.enable_domain_auto_renew(domain_event.domain_name)
                 else:
                     domain_manager.disable_domain_auto_renew(domain_event.domain_name)
