@@ -55,7 +55,6 @@ class DomainManager(ABC):
 
     def get_domain(self, domain_name) -> Optional[dict]:
         domains_response = self.list_domains()
-        print(domains_response)
 
         for domain in domains_response['Domains']:
             if domain['DomainName'] == domain_name:
@@ -253,9 +252,6 @@ def contacts_are_equal(new_contact: dict, old_contact: Contact):
     )
 
 def nameservers_are_equal(new_name_servers: List[str], old_name_servers: List[str]):
-    print(new_name_servers)
-    print(old_name_servers)
-
     return set(new_name_servers) == set(old_name_servers)
 
 @helper.update
