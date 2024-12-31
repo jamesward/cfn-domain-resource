@@ -13,13 +13,6 @@ logger = logging.getLogger(__name__)
 
 helper = CfnResource(json_logging=False, log_level='DEBUG', boto_level='CRITICAL', sleep_on_delete=120, ssl_verify=None)
 
-try:
-    # domain_manager = DomainManagerLive()
-    pass
-except Exception as e:
-    helper.init_failure(e)
-
-
 class DomainManager(ABC):
     @abstractmethod
     def list_domains(self, **kwargs):
@@ -128,6 +121,13 @@ class DomainEvent:
     name_servers: Optional[List[str]]
 
 
+try:
+    domain_manager = DomainManagerLive()
+    pass
+except Exception as e:
+    helper.init_failure(e)
+
+
 def parse_event(event):
     return DomainEvent(
         domain_name=event['ResourceProperties']['DomainName'],
@@ -147,23 +147,22 @@ def parse_event(event):
         name_servers=event['ResourceProperties'].get('NameServers', [])
     )
 
-def domain_manager(context) -> DomainManager:
-    return context['domain_manager']
 
 @helper.create
 def create(event, context):
     logger.info("Got Create")
+    # domain_manager = DomainManagerLive()
     domain_event = parse_event(event)
-    domain = domain_manager(context).get_domain(domain_event.domain_name)
+    domain = domain_manager.get_domain(domain_event.domain_name)
 
     if domain is None:
         transfer_auth_code = event['ResourceProperties'].get('TransferAuthCode')
 
         if transfer_auth_code is None:
-            availability = domain_manager(context).check_domain_availability(domain_event.domain_name)
+            availability = domain_manager.check_domain_availability(domain_event.domain_name)
 
             if availability['Availability'] == 'AVAILABLE':
-                domain_manager(context).register_domain(
+                domain_manager.register_domain(
                     DomainName = domain_event.domain_name,
                     DurationInYears = 1,
                     AutoRenew = domain_event.auto_renew,
@@ -176,14 +175,14 @@ def create(event, context):
                 )
 
                 if domain_event.name_servers:
-                    domain_manager(context).update_domain_nameservers(
+                    domain_manager.update_domain_nameservers(
                         DomainName = domain_event.domain_name,
                         Nameservers = [{'Name': ns} for ns in domain_event.name_servers]
                     )
             else:
                 raise Exception(f"Domain {domain_event.domain_name} is not available")
         else:
-            transferability = domain_manager(context).check_domain_transferability(
+            transferability = domain_manager.check_domain_transferability(
                 DomainName = domain_event.domain_name,
                 AuthCode = transfer_auth_code
             )
@@ -205,7 +204,7 @@ def create(event, context):
                 if domain_event.name_servers:
                     params['Nameservers'] = [{'Name': ns} for ns in domain_event.name_servers]
 
-                domain_manager(context).transfer_domain(**params)
+                domain_manager.transfer_domain(**params)
             else:
                 raise Exception(f"Domain {domain_event.domain_name} is not transferable")
 
@@ -216,7 +215,7 @@ def create(event, context):
 def update(event, context):
     logger.info("Got Update")
     domain_event = parse_event(event)
-    domain = domain_manager(context).get_domain(domain_event.domain_name)
+    domain = domain_manager.get_domain(domain_event.domain_name)
 
     if domain is None:
         raise Exception(f"Domain {domain_event.domain_name} does not exist")
@@ -297,5 +296,4 @@ def delete(event, context):
 
 
 def handler(event, context):
-    context.domain_manager = DomainManagerLive()
     helper(event, context)

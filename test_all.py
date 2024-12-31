@@ -41,11 +41,6 @@ class DomainManagerFake(DomainManager):
     def transfer_domain(self, **kwargs):
         self.events.append("transfer_domain")
 
-def context():
-    return {
-        'domain_manager': DomainManagerFake()
-    }
-
 def test_exists():
 
     event = {
@@ -67,8 +62,8 @@ def test_exists():
         }
     }
 
-    my_context = context()
+    index.domain_manager = DomainManagerFake()
 
-    response = index.create(event, my_context)
+    response = index.create(event, None)
     assert response == "foo.com"
-    assert len(my_context['domain_manager'].events) == 0
+    assert len(index.domain_manager.events) == 0
