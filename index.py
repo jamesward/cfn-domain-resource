@@ -186,9 +186,9 @@ def parse_event(event):
 def create(event, context):
     logger.info("Got Create")
     domain_event = parse_event(event)
-    domain = domain_manager.get_domain(domain_event.domain_name)
+    domain_details = domain_manager.get_domain(domain_event.domain_name)
 
-    if domain is None:
+    if domain_details is None:
         transfer_auth_code = event['ResourceProperties'].get('TransferAuthCode')
 
         if transfer_auth_code is None:
@@ -238,8 +238,11 @@ def create(event, context):
             else:
                 raise Exception(f"Domain {domain_event.domain_name} is not transferable")
     else:
-        # todo: if the domain is already exists, it may need to be updated (name servers, etc)
-        pass
+        if domain_event.name_servers:
+            old_nameservers = [ns.get('Name') for ns in domain_details.get('Nameservers', [])]
+            nameservers_same = nameservers_are_equal(domain_event.name_servers, old_nameservers)
+            if not nameservers_same:
+                domain_manager.update_domain_nameservers(domain_event.domain_name, domain_event.name_servers)
 
     return domain_event.domain_name
 
