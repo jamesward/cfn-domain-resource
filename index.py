@@ -66,7 +66,7 @@ class DomainManager(ABC):
     def get_operation_detail(self, operation_id) -> dict:
         pass
 
-    def get_domain(self, domain_name) -> Optional[dict]:
+    def get_domain_or_operation(self, domain_name) -> Optional[dict | str]:
         domains_response = self.list_domains()
 
         for domain in domains_response['Domains']:
@@ -77,9 +77,9 @@ class DomainManager(ABC):
 
         for operation in operations_response['Operations']:
             if (operation['Status'] == 'IN_PROGRESS' and
-                operation['Type'] == 'DOMAIN_TRANSFER_IN' and
+                operation['Type'] == 'TRANSFER_IN_DOMAIN' and
                 operation['DomainName'] == domain_name):
-                return self.get_operation_detail(operation['OperationId'])
+                return operation['OperationId']
 
         return None
 
@@ -180,15 +180,33 @@ def parse_event(event):
         name_servers=event['ResourceProperties'].get('NameServers', [])
     )
 
+def contacts_are_equal(new_contact: dict, old_contact: Contact):
+    return (
+            new_contact.get("FirstName") == old_contact.first_name and
+            new_contact.get("LastName") == old_contact.last_name and
+            new_contact.get("ContactType") == old_contact.contact_type and
+            new_contact.get("AddressLine1") == old_contact.address_line_1 and
+            new_contact.get("City") == old_contact.city and
+            new_contact.get("State") == old_contact.state and
+            new_contact.get("CountryCode") == old_contact.country_code and
+            new_contact.get("ZipCode") == old_contact.zip_code and
+            new_contact.get("PhoneNumber") == old_contact.phone_number and
+            new_contact.get("Email") == old_contact.email
+    )
 
+def nameservers_are_equal(new_name_servers: List[str], old_name_servers: List[str]):
+    return set(new_name_servers) == set(old_name_servers)
+
+# todo: create should not try to transfer domains already being transferred
+# todo: create & update should do the same things?
 
 @helper.create
-def create(event, context):
-    logger.info("Got Create")
+@helper.update
+def create_or_update(event, context):
     domain_event = parse_event(event)
-    domain_details = domain_manager.get_domain(domain_event.domain_name)
+    domain_or_operation = domain_manager.get_domain_or_operation(domain_event.domain_name)
 
-    if domain_details is None:
+    if domain_or_operation is None:
         transfer_auth_code = event['ResourceProperties'].get('TransferAuthCode')
 
         if transfer_auth_code is None:
@@ -237,81 +255,32 @@ def create(event, context):
                 domain_manager.transfer_domain(**params)
             else:
                 raise Exception(f"Domain {domain_event.domain_name} is not transferable")
+    elif isinstance(domain_or_operation, str):
+        # pending transfer
+        pass
     else:
+        admin_contact_same = contacts_are_equal(domain_or_operation.get('AdminContact', {}), domain_event.contact)
+        registrant_contact_same = contacts_are_equal(domain_or_operation.get('RegistrantContact', {}), domain_event.contact)
+        tech_contact_same = contacts_are_equal(domain_or_operation.get('TechContact', {}), domain_event.contact)
+
+        if not admin_contact_same or not registrant_contact_same or not tech_contact_same:
+            domain_manager.update_domain_contact(domain_event.domain_name, domain_event.contact)
+
+
+        if domain_event.auto_renew != domain_or_operation.get('AutoRenew', False):
+            if domain_event.auto_renew:
+                domain_manager.enable_domain_auto_renew(domain_event.domain_name)
+            else:
+                domain_manager.disable_domain_auto_renew(domain_event.domain_name)
+
+
         if domain_event.name_servers:
-            old_nameservers = [ns.get('Name') for ns in domain_details.get('Nameservers', [])]
+            old_nameservers = [ns.get('Name') for ns in domain_or_operation.get('Nameservers', [])]
             nameservers_same = nameservers_are_equal(domain_event.name_servers, old_nameservers)
             if not nameservers_same:
                 domain_manager.update_domain_nameservers(domain_event.domain_name, domain_event.name_servers)
 
     return domain_event.domain_name
-
-def contacts_are_equal(new_contact: dict, old_contact: Contact):
-    return (
-        new_contact.get("FirstName") == old_contact.first_name and
-        new_contact.get("LastName") == old_contact.last_name and
-        new_contact.get("ContactType") == old_contact.contact_type and
-        new_contact.get("AddressLine1") == old_contact.address_line_1 and
-        new_contact.get("City") == old_contact.city and
-        new_contact.get("State") == old_contact.state and
-        new_contact.get("CountryCode") == old_contact.country_code and
-        new_contact.get("ZipCode") == old_contact.zip_code and
-        new_contact.get("PhoneNumber") == old_contact.phone_number and
-        new_contact.get("Email") == old_contact.email
-    )
-
-def nameservers_are_equal(new_name_servers: List[str], old_name_servers: List[str]):
-    return set(new_name_servers) == set(old_name_servers)
-
-@helper.update
-def update(event, context):
-    logger.info("Got Update")
-    domain_event = parse_event(event)
-    domain_details = domain_manager.get_domain_detail(domain_event.domain_name)
-
-    if domain_details is None:
-        raise Exception(f"Domain {domain_event.domain_name} does not exist")
-    else:
-        status = domain_details.get('StatusList', [])
-        pending_transfer = any('PENDING_TRANSFER' in s for s in status)
-
-        if not pending_transfer:
-            admin_contact_same = contacts_are_equal(domain_details.get('AdminContact', {}), domain_event.contact)
-            registrant_contact_same = contacts_are_equal(domain_details.get('RegistrantContact', {}), domain_event.contact)
-            tech_contact_same = contacts_are_equal(domain_details.get('TechContact', {}), domain_event.contact)
-
-            if not admin_contact_same or not registrant_contact_same or not tech_contact_same:
-                domain_manager.update_domain_contact(domain_event.domain_name, domain_event.contact)
-
-
-            if domain_event.auto_renew != domain_details.get('AutoRenew', False):
-                if domain_event.auto_renew:
-                    domain_manager.enable_domain_auto_renew(domain_event.domain_name)
-                else:
-                    domain_manager.disable_domain_auto_renew(domain_event.domain_name)
-
-
-            if domain_event.name_servers:
-                old_nameservers = [ns.get('Name') for ns in domain_details.get('Nameservers', [])]
-                nameservers_same = nameservers_are_equal(domain_event.name_servers, old_nameservers)
-                if not nameservers_same:
-                    domain_manager.update_domain_nameservers(domain_event.domain_name, domain_event.name_servers)
-
-    return domain_event.domain_name
-
-
-@helper.delete
-def delete(event, context):
-    logger.info("Got Delete")
-
-    # client.get_domain_detail(
-    #     DomainName = domain_name
-    # )
-
-    # How do we handle Delete? What about rollbacks? What about moving from one CFN to another? Maybe a field that confirms we actually want to delete it?
-    # client.delete_domain(
-    #  DomainName = domain_name
-    # )
 
 
 def handler(event, context):
