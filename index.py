@@ -47,6 +47,7 @@ class DomainEvent:
     contact: Contact
     auto_renew: bool
     name_servers: Optional[List[str]]
+    duration_in_years: int
 
 
 class DomainManager(ABC):
@@ -177,7 +178,8 @@ def parse_event(event):
             email=event['ResourceProperties']['Contact']['email']
         ),
         auto_renew=bool(event['ResourceProperties'].get('AutoRenew', True)),
-        name_servers=event['ResourceProperties'].get('NameServers', [])
+        name_servers=event['ResourceProperties'].get('NameServers', []),
+        duration_in_years=int(event['ResourceProperties'].get('DurationInYears', 1))
     )
 
 def contacts_are_equal(new_contact: dict, old_contact: Contact):
@@ -215,7 +217,7 @@ def create_or_update(event, context):
             if availability['Availability'] == 'AVAILABLE':
                 domain_manager.register_domain(
                     DomainName = domain_event.domain_name,
-                    DurationInYears = 1,
+                    DurationInYears = domain_event.duration_in_years,
                     AutoRenew = domain_event.auto_renew,
                     AdminContact = domain_event.contact.to_boto(),
                     RegistrantContact = domain_event.contact.to_boto(),
@@ -239,7 +241,7 @@ def create_or_update(event, context):
                 params = {
                     'DomainName': domain_event.domain_name,
                     'AuthCode': transfer_auth_code,
-                    'DurationInYears': 1,
+                    'DurationInYears': domain_event.duration_in_years,
                     'AutoRenew': domain_event.auto_renew,
                     'AdminContact': domain_event.contact.to_boto(),
                     'RegistrantContact': domain_event.contact.to_boto(),
