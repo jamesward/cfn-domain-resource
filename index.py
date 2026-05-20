@@ -209,6 +209,20 @@ def create_or_update(event, context):
     domain_or_operation = domain_manager.get_domain_or_operation(domain_event.domain_name)
 
     if domain_or_operation is None:
+        # On Update, the domain was tracked by CloudFormation in the past
+        # but is no longer in our account (e.g. it was allowed to expire).
+        # Don't try to re-register it - that's almost certainly the opposite
+        # of what the operator intended. Log and return success so the stack
+        # update can proceed; the resource lingers in the stack as a no-op
+        # until the operator removes it from the template.
+        if event.get('RequestType') == 'Update':
+            logger.warning(
+                "Domain %s is no longer in this account (likely expired). "
+                "Skipping re-registration on Update.",
+                domain_event.domain_name
+            )
+            return domain_event.domain_name
+
         transfer_auth_code = event['ResourceProperties'].get('TransferAuthCode')
 
         if transfer_auth_code is None:
@@ -283,6 +297,18 @@ def create_or_update(event, context):
                 domain_manager.update_domain_nameservers(domain_event.domain_name, domain_event.name_servers)
 
     return domain_event.domain_name
+
+
+@helper.delete
+def delete(event, context):
+    # Intentionally a no-op. We never want this custom resource to actively
+    # delete a domain from Route 53 Domains: that is an irreversible
+    # registrar operation. Removing the resource from the stack only stops
+    # CloudFormation from tracking it; the domain itself is left in place
+    # (and can be allowed to expire by setting AutoRenew=false beforehand).
+    domain_name = event.get('ResourceProperties', {}).get('DomainName')
+    logger.info("Delete requested for domain %s; no-op (domain left intact).", domain_name)
+    return domain_name
 
 
 def handler(event, context):

@@ -3,9 +3,10 @@ import index
 from index import DomainManager, DomainManagerLive
 
 class DomainManagerFake(DomainManager):
-    events = []
-    register_kwargs = None
-    transfer_kwargs = None
+    def __init__(self):
+        self.events = []
+        self.register_kwargs = None
+        self.transfer_kwargs = None
 
     def list_operations(self, **kwargs):
         return {'Operations': []}
@@ -199,6 +200,68 @@ def test_transfer_custom_duration():
     index.create_or_update(event, None)
     assert "transfer_domain" in index.domain_manager.events
     assert index.domain_manager.transfer_kwargs['DurationInYears'] == 2
+
+
+def test_update_missing_domain_is_noop():
+    """On Update for a domain that's no longer in the account (e.g. it
+    expired), the resource should not try to re-register it. It should
+    just return success."""
+    event = {
+        'RequestType': 'Update',
+        'ResourceProperties': {
+            'DomainName': "expired.com",
+            'Contact': _contact(),
+            'AutoRenew': 'false'
+        }
+    }
+
+    # RegisterFake reports the domain as not in the account but available;
+    # without the no-op guard, the code would call register_domain.
+    index.domain_manager = DomainManagerRegisterFake()
+
+    response = index.create_or_update(event, None)
+    assert response == "expired.com"
+    assert "register_domain" not in index.domain_manager.events
+    assert "transfer_domain" not in index.domain_manager.events
+
+
+def test_create_missing_domain_still_registers():
+    """The Update no-op must NOT apply to Create - new domains should still
+    be registered."""
+    event = {
+        'RequestType': 'Create',
+        'ResourceProperties': {
+            'DomainName': "fresh.com",
+            'Contact': _contact(),
+            'AutoRenew': 'true'
+        }
+    }
+
+    index.domain_manager = DomainManagerRegisterFake()
+
+    response = index.create_or_update(event, None)
+    assert response == "fresh.com"
+    assert "register_domain" in index.domain_manager.events
+
+
+def test_delete_is_noop():
+    """Delete must never call AWS - the domain must remain registered.
+    We just stop tracking it in CloudFormation."""
+    event = {
+        'RequestType': 'Delete',
+        'ResourceProperties': {
+            'DomainName': "donotdelete.com",
+            'Contact': _contact(),
+            'AutoRenew': 'true'
+        }
+    }
+
+    index.domain_manager = DomainManagerFake()
+
+    response = index.delete(event, None)
+    assert response == "donotdelete.com"
+    # No AWS-mutating call of any kind.
+    assert index.domain_manager.events == []
 
 
 def test_live_create_unavailable():
