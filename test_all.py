@@ -35,7 +35,8 @@ class DomainManagerFake(DomainManager):
         }
 
     def get_operation_detail(self, operation_id):
-        pass
+        self.events.append("get_operation_detail")
+        return {'Status': 'SUCCESSFUL'}
 
     def list_domains(self, **kwargs):
         return {
@@ -52,6 +53,7 @@ class DomainManagerFake(DomainManager):
     def register_domain(self, **kwargs):
         self.events.append("register_domain")
         self.register_kwargs = kwargs
+        return {'OperationId': 'op-fake-123'}
 
     def update_domain_nameservers(self, *args, **kwargs):
         self.events.append("update_domain_nameservers")
@@ -242,6 +244,84 @@ def test_create_missing_domain_still_registers():
     response = index.create_or_update(event, None)
     assert response == "fresh.com"
     assert "register_domain" in index.domain_manager.events
+
+
+def test_register_with_nameservers_waits_before_update():
+    """A fresh registration that also sets nameservers must wait for the
+    async registration operation to complete before calling
+    UpdateDomainNameservers - otherwise the domain is "not found in account"."""
+    event = {
+        'RequestType': 'Create',
+        'ResourceProperties': {
+            'DomainName': "cimd.now",
+            'Contact': _contact(),
+            'AutoRenew': 'true',
+            'NameServers': ['ns-1.example.com', 'ns-2.example.com']
+        }
+    }
+
+    index.domain_manager = DomainManagerRegisterFake()
+
+    response = index.create_or_update(event, None)
+    assert response == "cimd.now"
+
+    events = index.domain_manager.events
+    # register, then poll the operation, then (only after) update nameservers
+    assert events.index("register_domain") < events.index("get_operation_detail")
+    assert events.index("get_operation_detail") < events.index("update_domain_nameservers")
+
+
+def test_register_without_nameservers_does_not_wait():
+    """No nameservers to set => no need to wait for the operation."""
+    event = {
+        'RequestType': 'Create',
+        'ResourceProperties': {
+            'DomainName': "newdomain.com",
+            'Contact': _contact(),
+            'AutoRenew': 'true'
+        }
+    }
+
+    index.domain_manager = DomainManagerRegisterFake()
+
+    index.create_or_update(event, None)
+    assert "register_domain" in index.domain_manager.events
+    assert "get_operation_detail" not in index.domain_manager.events
+    assert "update_domain_nameservers" not in index.domain_manager.events
+
+
+def test_wait_for_operation_polls_until_successful():
+    """wait_for_operation keeps polling through non-terminal states."""
+    statuses = iter([
+        {'Status': 'SUBMITTED'},
+        {'Status': 'IN_PROGRESS'},
+        {'Status': 'SUCCESSFUL'},
+    ])
+
+    manager = DomainManagerFake()
+    manager.get_operation_detail = lambda operation_id: next(statuses)
+
+    # sleep is injected as a no-op so the test doesn't actually block
+    manager.wait_for_operation("op-1", sleep=lambda _: None)
+    # reaching here without raising means it succeeded
+
+
+def test_wait_for_operation_raises_on_failure():
+    manager = DomainManagerFake()
+    manager.get_operation_detail = lambda operation_id: {'Status': 'ERROR'}
+
+    with pytest.raises(Exception):
+        manager.wait_for_operation("op-1", sleep=lambda _: None)
+
+
+def test_wait_for_operation_times_out():
+    manager = DomainManagerFake()
+    manager.get_operation_detail = lambda operation_id: {'Status': 'IN_PROGRESS'}
+
+    with pytest.raises(Exception):
+        manager.wait_for_operation(
+            "op-1", timeout_seconds=10, poll_interval_seconds=5, sleep=lambda _: None
+        )
 
 
 def test_delete_is_noop():

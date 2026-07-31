@@ -2,14 +2,37 @@ from __future__ import print_function
 
 from abc import abstractmethod, ABC
 from dataclasses import dataclass
+from enum import Enum
 
 from crhelper import CfnResource
 import logging
+import time
 import boto3
 
-from typing import Optional, List
+from typing import Optional, List, Callable
 
 logger = logging.getLogger(__name__)
+
+
+class OperationStatus(Enum):
+    """Status values returned by the Route 53 Domains operation APIs.
+
+    Modelled as an enum rather than bare strings so the wait loop below can
+    branch exhaustively on known-terminal vs. in-flight states instead of
+    scattering magic strings around.
+    """
+    SUBMITTED = 'SUBMITTED'
+    IN_PROGRESS = 'IN_PROGRESS'
+    SUCCESSFUL = 'SUCCESSFUL'
+    ERROR = 'ERROR'
+    FAILED = 'FAILED'
+
+    @classmethod
+    def from_api(cls, value: Optional[str]) -> Optional['OperationStatus']:
+        try:
+            return cls(value)
+        except ValueError:
+            return None
 
 helper = CfnResource(json_logging=False, log_level='DEBUG', boto_level='CRITICAL', sleep_on_delete=120, ssl_verify=None)
 
@@ -66,6 +89,42 @@ class DomainManager(ABC):
     @abstractmethod
     def get_operation_detail(self, operation_id) -> dict:
         pass
+
+    def wait_for_operation(
+        self,
+        operation_id: str,
+        timeout_seconds: int = 540,
+        poll_interval_seconds: int = 5,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        """Block until an async Route 53 Domains operation reaches a terminal
+        state.
+
+        Registration (and transfer) are asynchronous: RegisterDomain returns
+        immediately with an OperationId, and the domain does not appear in the
+        account until the operation reaches SUCCESSFUL. Callers that need to
+        act on the freshly registered domain (e.g. UpdateDomainNameservers)
+        must wait first, otherwise the domain is "not found in account".
+
+        Raises on ERROR/FAILED or on timeout. `sleep` is injectable so tests
+        can drive the loop without real delays.
+        """
+        attempts = max(1, timeout_seconds // poll_interval_seconds)
+        for attempt in range(attempts):
+            status = OperationStatus.from_api(
+                self.get_operation_detail(operation_id).get('Status')
+            )
+            if status == OperationStatus.SUCCESSFUL:
+                return
+            if status in (OperationStatus.ERROR, OperationStatus.FAILED):
+                raise Exception(
+                    f"Operation {operation_id} did not succeed (status: {status.value})"
+                )
+            if attempt < attempts - 1:
+                sleep(poll_interval_seconds)
+        raise Exception(
+            f"Timed out after {timeout_seconds}s waiting for operation {operation_id}"
+        )
 
     def get_domain_or_operation(self, domain_name) -> Optional[dict | str]:
         domains_response = self.list_domains()
@@ -229,7 +288,7 @@ def create_or_update(event, context):
             availability = domain_manager.check_domain_availability(domain_event.domain_name)
 
             if availability['Availability'] == 'AVAILABLE':
-                domain_manager.register_domain(
+                registration = domain_manager.register_domain(
                     DomainName = domain_event.domain_name,
                     DurationInYears = domain_event.duration_in_years,
                     AutoRenew = domain_event.auto_renew,
@@ -242,6 +301,14 @@ def create_or_update(event, context):
                 )
 
                 if domain_event.name_servers:
+                    # Registration is asynchronous: the domain is not in the
+                    # account (and so UpdateDomainNameservers fails with
+                    # "Domain ... not found in account") until the registration
+                    # operation completes. Wait for it before setting the
+                    # nameservers to point at our Route 53 hosted zone.
+                    operation_id = (registration or {}).get('OperationId')
+                    if operation_id is not None:
+                        domain_manager.wait_for_operation(operation_id)
                     domain_manager.update_domain_nameservers(domain_event.domain_name, domain_event.name_servers)
             else:
                 raise Exception(f"Domain {domain_event.domain_name} is not available")
