@@ -1,5 +1,13 @@
 # AWS CloudFormation Domain Resource
 
+> [!IMPORTANT]
+> **This repository is archived and replaced by [jamesward/cfn-extras-resource](https://github.com/jamesward/cfn-extras-resource).**
+> Its **Domain** resource (`Handler: cfn_extras.domain.handler`) registers or transfers a Route 53 domain and keeps its contact, auto-renew and nameservers in sync. It ships with the other resources as one
+> Lambda artifact in a public, versioned S3 bucket, so there's nothing to build. See that repository's
+> README for the CloudFormation snippet and the per-release `S3ObjectVersion`.
+>
+> The original code and documentation below are kept for reference.
+
 This project provides a custom CloudFormation resource for managing domain names and DNS records using AWS Route 53.
 
 The AWS CloudFormation Domain Resource allows you to easily create and manage domain names and associated DNS records as part of your CloudFormation stacks. It simplifies the process of setting up and configuring domains for your applications deployed on AWS.
